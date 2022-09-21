@@ -10,11 +10,12 @@ import math
 
 class ESFEM_Mesh:
 
-    def __init__(self, NodesCoord, EdgeNodeConn, EdgeNodes):
+    def __init__(self, NodesCoord, EdgeNodeConn, EdgeNodes, EdgeFN):
 
         self.NodesCoord = NodesCoord
         self.EdgeNodeConn = EdgeNodeConn
         self.EdgeNodes = EdgeNodes
+        self.EdgeFN = EdgeFN
         self.totNodes = max(list(self.NodesCoord.keys()))
         self.Nelem = max(list(self.EdgeNodeConn.keys()))
         self.totCentroids = None
@@ -29,13 +30,13 @@ class ESFEM_Mesh:
 
         elem = self.EdgeNodeConn[edge]
 
-        if len(elem) == 3:
+        if len(elem)-6 == 3:
             Centroid = (1/3) * (np.array(self.NodesCoord[elem[0]]) + np.array(self.NodesCoord[elem[1]]) + \
                                 np.array(self.NodesCoord[elem[2]]))
             
             smootheddomain = [self.NodesCoord[elem[0]], list(Centroid), self.NodesCoord[elem[1]]] 
         
-        if len(elem) == 4:
+        if len(elem)-10 == 4:
             Centroid1 = (1/3) * (np.array(self.NodesCoord[elem[0]]) + np.array(self.NodesCoord[elem[1]]) + \
                                 np.array(self.NodesCoord[elem[2]]))
             Centroid2 = (1/3) * (np.array(self.NodesCoord[elem[0]]) + np.array(self.NodesCoord[elem[2]]) + \
@@ -194,7 +195,9 @@ class ESFEM_Mesh:
         return Elem_topo
     
 
-    def PlotMesh(self, SD=[], label_nodes=False, label_edge=False, label_centroid=False, save=False, zoom=np.array([])):
+    def PlotMesh(self, SD=[], label_nodes=False, label_edge=False,
+                label_centroid=False, label_FN=False, save=False, 
+                zoom=np.array([])):
 
         plt.axes()    
 
@@ -204,6 +207,12 @@ class ESFEM_Mesh:
                 textpos = 0.5 * np.sum(self.Edges[key], axis=0)
                 plt.text(textpos[0], textpos[1], '{:d}'.format(key), fontsize='small', ha='center', va='center', 
                             color='red', bbox=dict(facecolor='white', edgecolor='red', pad=0.5))
+            if label_nodes:
+                textpos = 0.5 * np.sum(self.Edges[key], axis=0)
+                plt.text(textpos[0], textpos[1], '{:d},{:d}'.format(self.EdgeFN[key][0], self.EdgeFN[key][1]), 
+                            fontsize='small', ha='center', va='center', color='red', 
+                            bbox=dict(facecolor='white', edgecolor='red', pad=0.5))
+
             plt.gca().add_line(Edge)
 
             if key in SD:
@@ -363,7 +372,60 @@ def EdgeConnectivity(ElemNodeConn):
 
     return EdgeConn, ElemEdgeConn, EdgeNumber
 
-def ESFEM_Nodes(ElemNodeConn, EdgeConn, EdgeNumber):
+def floatingNodes(numOfNodes, numOfEdges):
+
+    FNodesCoord = {}
+
+    FNid = numOfNodes + 1
+
+    for i in range(numOfEdges):
+        FNodesCoord[FNid] = [0., 0.]
+        FNid += 1
+        FNodesCoord[FNid] = [0., 0.]
+        FNid += 1
+
+    return FNodesCoord
+
+def EdgeFloatingNodes(ElemNodeConn, ElemEdgeConn, numOfNodes):
+
+    FNid = numOfNodes + 1
+
+    EdgeFN = {}
+
+    for elem, nodes in ElemNodeConn.items():
+
+        Edges = ElemEdgeConn[elem]
+
+        for edge in Edges:
+
+            if edge > 0:
+                EdgeFN[edge] = (FNid, FNid+1)
+                FNid += 2
+    
+    return EdgeFN
+
+def arrangeEdges(edges, currEdge):
+    prevedges = []
+    nextedges = []
+    currEdgepass = False
+
+    
+    for ed in edges:
+        if abs(ed) == currEdge:
+            currEdgepass = True
+        
+        else:
+            if currEdgepass:
+                nextedges.append(ed)
+            else:
+                prevedges.append(ed)
+        
+    edges_arranged = nextedges + prevedges
+
+    return edges_arranged
+                
+
+def ESFEM_Nodes(ElemNodeConn, EdgeConn, EdgeNumber, EdgeFN, ElemEdgeConn):
     '''
     Calculates the Edge Node Connectivity for the smoothed domain 
     associated to the edge.
@@ -387,6 +449,14 @@ def ESFEM_Nodes(ElemNodeConn, EdgeConn, EdgeNumber):
     for edge in EdgeConn.keys():
         elems = EdgeConn[edge]
         rawNodelist = []
+
+        Node1, Node2 = EdgeNumber[edge]
+        Nodelist = []
+        FNodeslist = []
+        Nodelist.append(Node1)
+        Nodelist.append(Node2)
+        FNodeslist += EdgeFN[edge]
+
         for elem in elems:
         
             nodes = ElemNodeConn[elem]
@@ -397,12 +467,7 @@ def ESFEM_Nodes(ElemNodeConn, EdgeConn, EdgeNumber):
                     pass
 
                 else:
-                    rawNodelist.append(node)
-
-        Node1, Node2 = EdgeNumber[edge]
-        Nodelist = []
-        Nodelist.append(Node1)
-        Nodelist.append(Node2)
+                    rawNodelist.append(node)       
 
         if len(rawNodelist) == 3:
             for node in rawNodelist:
@@ -411,6 +476,13 @@ def ESFEM_Nodes(ElemNodeConn, EdgeConn, EdgeNumber):
                 else:
                     Nodelist.append(node)
 
+            for ed in arrangeEdges(ElemEdgeConn[elems[0]], edge):
+                if ed < 0:
+                    FNodes = EdgeFN[-ed]
+                    FNodeslist += [FNodes[1], FNodes[0]]
+                else:
+                    FNodeslist += EdgeFN[abs(ed)]
+
         else:
             Nodelist.insert(1, rawNodelist[-1])
             for node in rawNodelist:
@@ -418,8 +490,22 @@ def ESFEM_Nodes(ElemNodeConn, EdgeConn, EdgeNumber):
                     pass
                 else:
                     Nodelist.append(node)
-
-        EdgeNodeConn[edge] = Nodelist
+            
+            for ed in arrangeEdges(ElemEdgeConn[elems[1]], edge):
+                if ed < 0:
+                    FNodes = EdgeFN[-ed]
+                    FNodeslist += [FNodes[1], FNodes[0]]
+                else:
+                    FNodeslist += EdgeFN[abs(ed)]
+                    
+            for ed in arrangeEdges(ElemEdgeConn[elems[0]], edge):
+                if ed < 0:
+                    FNodes = EdgeFN[-ed]
+                    FNodeslist += [FNodes[1], FNodes[0]]
+                else:
+                    FNodeslist += EdgeFN[abs(ed)]
+                    
+        EdgeNodeConn[edge] = Nodelist + FNodeslist
 
     return EdgeNodeConn  
         
