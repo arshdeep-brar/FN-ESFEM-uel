@@ -1,0 +1,11 @@
+{
+    "fortran.preferredCase": "uppercase",
+    "window.zoomLevel": 1,
+    "fortran.linter.includePaths": [
+        "${workspaceFolder}/analysis_modules",
+        "${workspaceFolder}/global_modules",
+        "${workspaceFolder}/output_modules",
+        "${workspaceFolder}/setup_modules",
+        "${workspaceFolder}/support_modules"]
+
+}
